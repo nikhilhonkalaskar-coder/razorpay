@@ -1,7 +1,6 @@
 const express = require("express");
 const crypto = require("crypto");
 const { google } = require("googleapis");
-const keys = require("./service-account.json");
 
 const app = express();
 
@@ -14,11 +13,11 @@ app.use(
   })
 );
 
-// Google Sheets Auth (service account)
+// Google Sheets Auth (ENV-based for Render)
 const client = new google.auth.JWT(
-  keys.client_email,
+  process.env.GOOGLE_CLIENT_EMAIL,
   null,
-  keys.private_key,
+  process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, "\n"),
   ["https://www.googleapis.com/auth/spreadsheets"]
 );
 
@@ -73,10 +72,7 @@ app.post("/razorpay-webhook", async (req, res) => {
     return res.status(400).send("Invalid signature");
   }
 
-  // Respond immediately
-  res.status(200).send("OK");
-
-  // Process async
+  res.status(200).send("OK"); // Immediate response
   setTimeout(() => processWebhook(req.body, time), 5);
 });
 
@@ -87,23 +83,23 @@ async function processWebhook(body, time) {
     const event = body.event;
     console.log(`[${time}] 📡 Event: ${event}`);
 
-    // Skip irrelevant events
     if (!ALLOWED_PAYMENT_EVENTS.includes(event)) {
       console.log(`[${time}] ⏭ Skipping unrelated event: ${event}`);
       return;
     }
 
-    // Extract payment
     const payment = extractPaymentEntity(body);
     if (!payment) {
-      console.log(`[${time}] ⚠️ Payment entity missing for event: ${event}`);
+      console.log(`[${time}] ⚠️ Payment entity missing`);
       return;
     }
 
     console.log(`[${time}] 💰 Payment ID: ${payment.id}`);
     console.log(`[${time}] 💳 Status: ${payment.status}`);
+    console.log(`[${time}] 👤 Email: ${payment.email}`);
+    console.log(`[${time}] 📞 Contact: ${payment.contact}`);
+    console.log(`[${time}] 🧑 Name: ${payment.notes?.name || "N/A"}`);
 
-    // Prepare row to insert into Google Sheet
     const row = [
       payment.id || "",
       payment.order_id || "",
@@ -111,7 +107,7 @@ async function processWebhook(body, time) {
       payment.contact || "",
       payment.amount ? payment.amount / 100 : "",
       payment.currency || "",
-      event, // event type
+      event,
       payment.status || "",
       payment.method || "",
       payment.error_code || "",
@@ -139,6 +135,7 @@ async function appendToSheet(row) {
   for (let i = 1; i <= 3; i++) {
     try {
       console.log(`📄 Writing to Google Sheet (Attempt ${i})...`);
+
       await client.authorize();
 
       await sheets.spreadsheets.values.append({
