@@ -21,6 +21,7 @@ const client = new google.auth.JWT(
   ["https://www.googleapis.com/auth/spreadsheets"]
 );
 
+
 const sheets = google.sheets({ version: "v4", auth: client });
 
 const SPREADSHEET_ID = "1sw01ACVf1XhrVa3FggDdwteGlzpH1qIUAhigHBTHvgE";
@@ -95,31 +96,36 @@ async function processWebhook(body, time) {
     }
 
     console.log(`[${time}] 💰 Payment ID: ${payment.id}`);
-    console.log(`[${time}] 💳 Status: ${payment.status}`);
-    console.log(`[${time}] 👤 Email: ${payment.email}`);
-    console.log(`[${time}] 📞 Contact: ${payment.contact}`);
-    console.log(`[${time}] 🧑 Name: ${payment.notes?.name || "N/A"}`);
+console.log(`[${time}] 💳 Status: ${payment.status}`);
+console.log(`[${time}] 👤 Email: ${payment.email}`);
+console.log(`[${time}] 📞 Contact: ${payment.contact}`);
+console.log(`[${time}] 🧑 Name: ${payment.notes?.name || "N/A"}`);
+console.log(`[${time}] 🌆 City: ${payment.notes?.city || "N/A"}`);
+console.log(`[${time}] 💵 Amount Paid: ₹${payment.amount ? payment.amount / 100 : 0}`); // ← Payment in INR
 
-    const row = [
-      payment.id || "",
-      payment.order_id || "",
-      payment.email || "",
-      payment.contact || "",
-      payment.amount ? payment.amount / 100 : "",
-      payment.currency || "",
-      event,
-      payment.status || "",
-      payment.method || "",
-      payment.error_code || "",
-      payment.error_description || "",
-      payment.notes?.name || "",
-      payment.notes?.phone || "",
-      payment.notes?.email || "",
-      payment.notes?.customfield1 || "",
-      payment.notes?.customfield2 || "",
-      new Date((payment.created_at || Math.floor(Date.now() / 1000)) * 1000)
-        .toLocaleString("en-IN")
-    ];
+
+   const row = [
+  payment.id || "",
+  payment.order_id || "",
+  payment.email || "",
+  payment.contact || "",
+  payment.amount ? payment.amount / 100 : "",
+  payment.currency || "",
+  event,
+  payment.status || "",
+  payment.method || "",
+  payment.error_code || "",
+  payment.error_description || "",
+  payment.notes?.name || "",
+  payment.notes?.phone || "",
+  payment.notes?.email || "",
+  payment.notes?.customfield1 || "",
+  payment.notes?.customfield2 || "",
+  payment.notes?.city || "",        // ← ADD CITY HERE
+  new Date((payment.created_at || Math.floor(Date.now() / 1000)) * 1000)
+    .toLocaleString("en-IN")
+];
+
 
     await appendToSheet(row);
     console.log(`[${time}] ✅ Stored to Google Sheet`);
@@ -172,3 +178,4 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () =>
   console.log(`🚀 Server running on port ${PORT}`)
 );
+
