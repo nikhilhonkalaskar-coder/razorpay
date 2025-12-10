@@ -20,7 +20,6 @@ const ALLOWED_PAYMENT_EVENTS = [
 ];
 
 // ========= MIDDLEWARE =========
-// Raw body required for signature validation
 app.use(express.json({
   verify: (req, res, buf) => {
     req.rawBody = buf.toString();
@@ -63,15 +62,6 @@ function istDateTimeFromUnix(unixSeconds) {
   return `${dateStr} ${timeStr}`;
 }
 
-// Safe helper to create HYPERLINK formula only when value exists
-function hyperlinkIf(value, urlPrefix = "") {
-  if (!value) return "";
-  // Escape double quotes in value
-  const safeValue = String(value).replace(/"/g, '""');
-  const url = `${urlPrefix}${value}`;
-  return `=HYPERLINK("${url}","${safeValue}")`;
-}
-
 // ========= WEBHOOK ROUTE =========
 app.post("/razorpay-webhook", async (req, res) => {
   const time = now();
@@ -104,16 +94,16 @@ async function processWebhook(body, time) {
       return;
     }
 
-    // Determine a simple status mapping
+    // Determine simple status
     let simpleStatus = "authorized";
     if (event === "payment.captured") simpleStatus = "success";
     if (event === "payment.failed") simpleStatus = "failed";
 
-    // Determine timestamp: prefer payment.created_at, else current time
+    // IST timestamp
     const createdAt = payment.created_at ? payment.created_at : Math.floor(Date.now() / 1000);
     const istDateTime = istDateTimeFromUnix(createdAt);
 
-    // Prepare values (raw values for logic)
+    // Extract fields
     const paymentId = payment.id || "";
     const orderId = payment.order_id || "";
     const email = payment.email || "";
@@ -134,36 +124,33 @@ async function processWebhook(body, time) {
     console.log(`[${time}] 🌆 City: ${notesCity || "N/A"}`);
     console.log(`[${time}] 💵 Amount Paid: ₹${amountINR}`);
 
-    // Build formatted row for Sheets (USER_ENTERED so formulas are evaluated)
-    // Payment ID clickable -> Razorpay dashboard link
+    // Hyperlink Payment ID (Razorpay dashboard)
     const paymentLinkPrefix = "https://dashboard.razorpay.com/app/payments/";
     const paymentIdCell = paymentId ? `=HYPERLINK("${paymentLinkPrefix + paymentId}", "${paymentId}")` : "";
-
-    // Email clickable if present
     const emailCell = email ? `=HYPERLINK("mailto:${email}","${email}")` : "";
 
     const formattedRow = [
-      paymentIdCell,        // A: Payment ID (clickable)
-      orderId,              // B: Order
-      emailCell,            // C: Email (clickable)
-      contact,              // D: Phone
-      amountINR,            // E: Amount
-      event,                // F: Event
-      simpleStatus,         // G: Status (mapped)
-      method,               // H: Method
-      notesName,            // I: Name
-      notesCity,            // J: City
-      istDateTime           // K: Date+Time (IST)
+      paymentIdCell,
+      orderId,
+      emailCell,
+      contact,
+      amountINR,
+      event,
+      simpleStatus,
+      method,
+      notesName,
+      notesCity,
+      istDateTime
     ];
 
     // Write to Sheet1 (All payments)
     await appendToSheetMain(formattedRow);
     console.log(`[${time}] ✅ Written to Sheet1`);
 
-    // If this is a ₹99 payment from the specified payment page, also write to Sheet2
+    // Write to Sheet2 for ALL ₹99 payments from your payment page
     if (payment.amount === AMOUNT_99 && pageId === PAYMENT_PAGE_ID_99) {
       await appendToSheet99(formattedRow);
-      console.log(`[${time}] 🎯 ₹99 payment from ${PAYMENT_PAGE_ID_99} written to Sheet2`);
+      console.log(`[${time}] 🎯 ₹99 payment written to Sheet2 (any status)`);
     } else {
       console.log(`[${time}] ⏭ Not a ₹99 payment for Sheet2`);
     }
@@ -174,10 +161,9 @@ async function processWebhook(body, time) {
 }
 
 // ========= APPEND TO SHEETS =========
-// Sheet1: All payments (Sheet1!A:K)
 async function appendToSheetMain(formattedRow) {
   if (!process.env.GOOGLE_CLIENT_EMAIL || !process.env.GOOGLE_PRIVATE_KEY) {
-    console.error("🚨 Google credentials missing. Cannot write to sheet.");
+    console.error("🚨 Google credentials missing. Cannot write to Sheet1.");
     return;
   }
   try {
@@ -193,10 +179,9 @@ async function appendToSheetMain(formattedRow) {
   }
 }
 
-// Sheet2: Only ₹99 payments (Sheet2!A:K)
 async function appendToSheet99(formattedRow) {
   if (!process.env.GOOGLE_CLIENT_EMAIL || !process.env.GOOGLE_PRIVATE_KEY) {
-    console.error("🚨 Google credentials missing. Cannot write to sheet.");
+    console.error("🚨 Google credentials missing. Cannot write to Sheet2.");
     return;
   }
   try {
