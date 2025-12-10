@@ -8,7 +8,7 @@ const app = express();
 const SPREADSHEET_ID = "1sw01ACVf1XhrVa3FggDdwteGlzpH1qIUAhigHBTHvgE";
 const WEBHOOK_SECRET = "Tbipl@123";
 
-// Allowed Razorpay events
+// Allowed payment events
 const ALLOWED_PAYMENT_EVENTS = [
   "payment.created",
   "payment.authorized",
@@ -62,10 +62,9 @@ app.post("/razorpay-webhook", async (req, res) => {
     console.log(`[${time}] ❌ Invalid signature`);
     return res.status(400).send("Invalid signature");
   }
+  console.log(`[${time}] 🔐 Signature: ✔ OK`);
 
-  console.log(`[${time}] 🔐 Signature OK`);
-  res.status(200).send("OK"); // Respond immediately
-
+  res.status(200).send("OK"); // Immediate response
   setTimeout(() => processWebhook(req.body, time), 5);
 });
 
@@ -73,7 +72,6 @@ app.post("/razorpay-webhook", async (req, res) => {
 async function processWebhook(body, time) {
   try {
     const event = body.event;
-
     if (!ALLOWED_PAYMENT_EVENTS.includes(event)) {
       console.log(`[${time}] ⏭ Skipping unrelated event: ${event}`);
       return;
@@ -85,34 +83,7 @@ async function processWebhook(body, time) {
       return;
     }
 
-    // Map status for simplicity
-    let status = "authorized";
-    if (event === "payment.captured") status = "success";
-    if (event === "payment.failed") status = "failed";
-
-    // Use payment.created_at timestamp or current time
-    const paymentTime = new Date((payment.created_at || Math.floor(Date.now() / 1000)) * 1000);
-    const dateStr = paymentTime.toLocaleDateString("en-IN");   // DD/MM/YYYY
-    const timeStr = paymentTime.toLocaleTimeString("en-IN", { hour12: false }); // HH:MM:SS
-
-    // Prepare simplified row
-    const row = [
-      payment.id || "",                     // Payment ID
-      payment.order_id || "",               // Order
-      payment.email || "",                  // Email
-      payment.contact || "",                // Phone
-      payment.amount ? payment.amount / 100 : 0, // Amount
-      event,                                // Event
-      status,                               // Status
-      payment.method || "",                 // Method
-      payment.notes?.name || "",            // Name
-      payment.notes?.city || "",            // City
-      `${dateStr} ${timeStr}`               // Date + Time
-    ];
-
-    await appendToSheet(row);
-
-    // Log details
+    // Log payment info
     console.log(`[${time}] 💰 Payment ID: ${payment.id}`);
     console.log(`[${time}] 💳 Status: ${payment.status}`);
     console.log(`[${time}] 👤 Email: ${payment.email}`);
@@ -120,6 +91,31 @@ async function processWebhook(body, time) {
     console.log(`[${time}] 🧑 Name: ${payment.notes?.name || "N/A"}`);
     console.log(`[${time}] 🌆 City: ${payment.notes?.city || "N/A"}`);
     console.log(`[${time}] 💵 Amount Paid: ₹${payment.amount ? payment.amount / 100 : 0}`);
+
+    // Prepare row for Google Sheet
+    const row = [
+      payment.id || "",
+      payment.order_id || "",
+      payment.email || "",
+      payment.contact || "",
+      payment.amount ? payment.amount / 100 : "",
+      payment.currency || "",
+      event,
+      payment.status || "",
+      payment.method || "",
+      payment.error_code || "",
+      payment.error_description || "",
+      payment.notes?.name || "",
+      payment.notes?.phone || "",
+      payment.notes?.email || "",
+      payment.notes?.customfield1 || "",
+      payment.notes?.customfield2 || "",
+      payment.notes?.city || "",
+      new Date((payment.created_at || Math.floor(Date.now() / 1000)) * 1000)
+        .toLocaleString("en-IN")
+    ];
+
+    await appendToSheet(row);
 
   } catch (err) {
     console.error(`[${time}] ❌ Webhook processing error:`, err);
@@ -135,25 +131,13 @@ async function appendToSheet(row) {
 
   try {
     await client.authorize();
-
-    // Make Payment ID & Email clickable
-    const paymentLink = `https://dashboard.razorpay.com/app/payments/${row[0]}`;
-    const formattedRow = [
-      `=HYPERLINK("${paymentLink}", "${row[0]}")`,  // Payment ID clickable
-      row[1],                                       // Order
-      `=HYPERLINK("mailto:${row[2]}", "${row[2]}")`, // Email clickable
-      row[3], row[4], row[5], row[6], row[7], row[8], row[9], row[10]
-    ];
-
     await sheets.spreadsheets.values.append({
       spreadsheetId: SPREADSHEET_ID,
-      range: "Sheet1!A:K",
-      valueInputOption: "USER_ENTERED", // Needed for HYPERLINK formulas
-      requestBody: { values: [formattedRow] }
+      range: "Sheet1!A:R",
+      valueInputOption: "RAW",
+      requestBody: { values: [row] }
     });
-
-    console.log("✅ Google Sheet write success (clickable links)");
-
+    console.log("✅ Google Sheet write success");
   } catch (err) {
     console.error("❌ Google Sheets error:", err.message);
   }
