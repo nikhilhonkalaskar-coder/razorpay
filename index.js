@@ -8,31 +8,27 @@ const app = express();
 const SPREADSHEET_ID = "1sw01ACVf1XhrVa3FggDdwteGlzpH1qIUAhigHBTHvgE";
 const WEBHOOK_SECRET = "Tbipl@123";
 
-// Allowed payment events
+// Only these Razorpay events allowed
 const ALLOWED_PAYMENT_EVENTS = [
-  "payment.created",
   "payment.authorized",
   "payment.captured",
-  "payment.failed",
-  "payment.refunded"
+  "payment.failed"
 ];
 
-// ========= MIDDLEWARE =========
-// RAW body needed for signature verification
+// RAW body needed for signature validation
 app.use(express.json({
   verify: (req, res, buf) => { req.rawBody = buf.toString(); }
 }));
 
-// ========= GOOGLE SHEETS AUTH =========
+// ========= GOOGLE AUTH =========
 const client = new google.auth.JWT({
   email: process.env.GOOGLE_CLIENT_EMAIL,
   key: process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, "\n"),
   scopes: ["https://www.googleapis.com/auth/spreadsheets"]
 });
-
 const sheets = google.sheets({ version: "v4", auth: client });
 
-// ========= HELPERS =========
+// Helpers
 function now() {
   return new Date().toLocaleTimeString("en-IN", { hour12: false });
 }
@@ -62,9 +58,10 @@ app.post("/razorpay-webhook", async (req, res) => {
     console.log(`[${time}] ❌ Invalid signature`);
     return res.status(400).send("Invalid signature");
   }
-  console.log(`[${time}] 🔐 Signature: ✔ OK`);
 
-  res.status(200).send("OK"); // Immediate response
+  console.log(`[${time}] 🔐 Signature OK`);
+  res.status(200).send("OK");
+
   setTimeout(() => processWebhook(req.body, time), 5);
 });
 
@@ -72,27 +69,23 @@ app.post("/razorpay-webhook", async (req, res) => {
 async function processWebhook(body, time) {
   try {
     const event = body.event;
+
     if (!ALLOWED_PAYMENT_EVENTS.includes(event)) {
-      console.log(`[${time}] ⏭ Skipping unrelated event: ${event}`);
+      console.log(`[${time}] ⏭ Skipping event: ${event}`);
       return;
     }
 
     const payment = extractPayment(body);
     if (!payment) {
-      console.log(`[${time}] ⚠️ Payment entity missing`);
+      console.log(`[${time}] ⚠️ Payment missing`);
       return;
     }
 
-    // Log payment info
-    console.log(`[${time}] 💰 Payment ID: ${payment.id}`);
-    console.log(`[${time}] 💳 Status: ${payment.status}`);
-    console.log(`[${time}] 👤 Email: ${payment.email}`);
-    console.log(`[${time}] 📞 Contact: ${payment.contact}`);
-    console.log(`[${time}] 🧑 Name: ${payment.notes?.name || "N/A"}`);
-    console.log(`[${time}] 🌆 City: ${payment.notes?.city || "N/A"}`);
-    console.log(`[${time}] 💵 Amount Paid: ₹${payment.amount ? payment.amount / 100 : 0}`);
+    // Determine FINAL STATUS
+    let final_status = "authorized";
+    if (event === "payment.captured") final_status = "captured";
+    if (event === "payment.failed") final_status = "failed";
 
-    // Prepare row for Google Sheet
     const row = [
       payment.id || "",
       payment.order_id || "",
@@ -100,8 +93,8 @@ async function processWebhook(body, time) {
       payment.contact || "",
       payment.amount ? payment.amount / 100 : "",
       payment.currency || "",
-      event,
-      payment.status || "",
+      event,                     // raw event
+      final_status,              // FINAL status (important)
       payment.method || "",
       payment.error_code || "",
       payment.error_description || "",
@@ -111,21 +104,20 @@ async function processWebhook(body, time) {
       payment.notes?.customfield1 || "",
       payment.notes?.customfield2 || "",
       payment.notes?.city || "",
-      new Date((payment.created_at || Math.floor(Date.now() / 1000)) * 1000)
-        .toLocaleString("en-IN")
+      new Date(payment.created_at * 1000).toLocaleString("en-IN")
     ];
 
     await appendToSheet(row);
 
   } catch (err) {
-    console.error(`[${time}] ❌ Webhook processing error:`, err);
+    console.error(`[${time}] ❌ Error:`, err);
   }
 }
 
-// ========= APPEND TO GOOGLE SHEET =========
+// ========= WRITE TO GOOGLE SHEET =========
 async function appendToSheet(row) {
   if (!process.env.GOOGLE_CLIENT_EMAIL || !process.env.GOOGLE_PRIVATE_KEY) {
-    console.error("🚨 Google credentials missing. Cannot write to sheet.");
+    console.error("🚨 Google credentials missing");
     return;
   }
 
@@ -137,17 +129,17 @@ async function appendToSheet(row) {
       valueInputOption: "RAW",
       requestBody: { values: [row] }
     });
-    console.log("✅ Google Sheet write success");
+    console.log("✅ Row Added to Google Sheet");
   } catch (err) {
-    console.error("❌ Google Sheets error:", err.message);
+    console.error("❌ Google Sheets Error:", err);
   }
 }
 
 // ========= TEST ROUTE =========
 app.get("/razorpay-webhook", (req, res) => {
-  res.status(200).send("✔ Razorpay Webhook Active (POST only)");
+  res.status(200).send("✔ Razorpay Webhook Running");
 });
 
-// ========= START SERVER =========
+// ========= START =========
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
+app.listen(PORT, () => console.log(`🚀 Server live on port ${PORT}`));
