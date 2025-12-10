@@ -8,7 +8,24 @@ const app = express();
 const SPREADSHEET_ID = "1sw01ACVf1XhrVa3FggDdwteGlzpH1qIUAhigHBTHvgE";
 const WEBHOOK_SECRET = "Tbipl@123";
 const PAYMENT_PAGE_ID_99 = "pl_RgmfHZBjsTtr1q";
-const AMOUNT_99 = 9900; // in paise
+const AMOUNT_99 = 9900; // 99 INR in paise
+
+const SHEET1 = "Sheet1";
+const SHEET2 = "Sheet2";
+
+const HEADERS = [
+  "Payment ID",
+  "Order",
+  "Email",
+  "Phone",
+  "Amount",
+  "Event",
+  "Status",
+  "Method",
+  "Name",
+  "City",
+  "Date"
+];
 
 // Allowed Razorpay events
 const ALLOWED_PAYMENT_EVENTS = [
@@ -75,7 +92,6 @@ app.post("/razorpay-webhook", async (req, res) => {
   console.log(`[${time}] 🔐 Signature OK`);
   res.status(200).send("OK"); // respond immediately
 
-  // process async
   setTimeout(() => processWebhook(req.body, time), 5);
 });
 
@@ -94,28 +110,23 @@ async function processWebhook(body, time) {
       return;
     }
 
-    // Determine simple status
     let simpleStatus = "authorized";
     if (event === "payment.captured") simpleStatus = "success";
     if (event === "payment.failed") simpleStatus = "failed";
 
-    // IST timestamp
     const createdAt = payment.created_at ? payment.created_at : Math.floor(Date.now() / 1000);
     const istDateTime = istDateTimeFromUnix(createdAt);
 
-    // Extract fields
     const paymentId = payment.id || "";
     const orderId = payment.order_id || "";
     const email = payment.email || "";
     const contact = payment.contact || "";
     const amountINR = payment.amount ? payment.amount / 100 : 0;
-    const currency = payment.currency || "";
     const method = payment.method || "";
     const notesName = payment.notes?.name || "";
     const notesCity = payment.notes?.city || "";
     const pageId = payment.notes?.razorpay_payment_page_id || "";
 
-    // Logging
     console.log(`[${time}] 💰 Payment ID: ${paymentId}`);
     console.log(`[${time}] 💳 Status: ${payment.status} (${event})`);
     console.log(`[${time}] 👤 Email: ${email || "N/A"}`);
@@ -124,7 +135,6 @@ async function processWebhook(body, time) {
     console.log(`[${time}] 🌆 City: ${notesCity || "N/A"}`);
     console.log(`[${time}] 💵 Amount Paid: ₹${amountINR}`);
 
-    // Hyperlink Payment ID (Razorpay dashboard)
     const paymentLinkPrefix = "https://dashboard.razorpay.com/app/payments/";
     const paymentIdCell = paymentId ? `=HYPERLINK("${paymentLinkPrefix + paymentId}", "${paymentId}")` : "";
     const emailCell = email ? `=HYPERLINK("mailto:${email}","${email}")` : "";
@@ -143,14 +153,14 @@ async function processWebhook(body, time) {
       istDateTime
     ];
 
-    // Write to Sheet1 (All payments)
-    await appendToSheetMain(formattedRow);
+    // Write to Sheet1 (all payments)
+    await appendToSheetWithHeaders(SHEET1, formattedRow);
     console.log(`[${time}] ✅ Written to Sheet1`);
 
-    // Write to Sheet2 for ALL ₹99 payments from your payment page
+    // Write to Sheet2 (all ₹99 payments from page, any status)
     if (payment.amount === AMOUNT_99 && pageId === PAYMENT_PAGE_ID_99) {
-      await appendToSheet99(formattedRow);
-      console.log(`[${time}] 🎯 ₹99 payment written to Sheet2 (any status)`);
+      await appendToSheetWithHeaders(SHEET2, formattedRow);
+      console.log(`[${time}] 🎯 ₹99 payment written to Sheet2`);
     } else {
       console.log(`[${time}] ⏭ Not a ₹99 payment for Sheet2`);
     }
@@ -160,40 +170,41 @@ async function processWebhook(body, time) {
   }
 }
 
-// ========= APPEND TO SHEETS =========
-async function appendToSheetMain(formattedRow) {
+// ========= APPEND TO SHEETS WITH HEADER =========
+async function appendToSheetWithHeaders(sheetName, row) {
   if (!process.env.GOOGLE_CLIENT_EMAIL || !process.env.GOOGLE_PRIVATE_KEY) {
-    console.error("🚨 Google credentials missing. Cannot write to Sheet1.");
+    console.error(`🚨 Google credentials missing. Cannot write to ${sheetName}.`);
     return;
   }
   try {
     await client.authorize();
-    await sheets.spreadsheets.values.append({
-      spreadsheetId: SPREADSHEET_ID,
-      range: "Sheet1!A:K",
-      valueInputOption: "USER_ENTERED",
-      requestBody: { values: [formattedRow] }
-    });
-  } catch (err) {
-    console.error("❌ Google Sheets error (Sheet1):", err.message || err);
-  }
-}
 
-async function appendToSheet99(formattedRow) {
-  if (!process.env.GOOGLE_CLIENT_EMAIL || !process.env.GOOGLE_PRIVATE_KEY) {
-    console.error("🚨 Google credentials missing. Cannot write to Sheet2.");
-    return;
-  }
-  try {
-    await client.authorize();
+    // Check if header exists
+    const res = await sheets.spreadsheets.values.get({
+      spreadsheetId: SPREADSHEET_ID,
+      range: `${sheetName}!A1:K1`
+    });
+
+    if (!res.data.values || res.data.values.length === 0) {
+      await sheets.spreadsheets.values.append({
+        spreadsheetId: SPREADSHEET_ID,
+        range: `${sheetName}!A1:K1`,
+        valueInputOption: "USER_ENTERED",
+        requestBody: { values: [HEADERS] }
+      });
+      console.log(`✅ Header added to ${sheetName}`);
+    }
+
+    // Append row
     await sheets.spreadsheets.values.append({
       spreadsheetId: SPREADSHEET_ID,
-      range: "Sheet2!A:K",
+      range: `${sheetName}!A:K`,
       valueInputOption: "USER_ENTERED",
-      requestBody: { values: [formattedRow] }
+      requestBody: { values: [row] }
     });
+
   } catch (err) {
-    console.error("❌ Google Sheets error (Sheet2):", err.message || err);
+    console.error(`❌ Google Sheets error (${sheetName}):`, err.message || err);
   }
 }
 
