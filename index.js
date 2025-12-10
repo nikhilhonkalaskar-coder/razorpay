@@ -32,10 +32,15 @@ const client = new google.auth.JWT({
 });
 const sheets = google.sheets({ version: "v4", auth: client });
 
-function now() {
-  return new Date().toLocaleTimeString("en-IN", { hour12: false });
+// ========= TIME FUNCTION =========
+function timestampInKolkata(unixSeconds) {
+  return new Date(unixSeconds * 1000).toLocaleString("en-IN", {
+    timeZone: "Asia/Kolkata",
+    hour12: false,
+  });
 }
 
+// ========= RAZORPAY SIGNATURE =========
 function verifySignature(req) {
   const signature = req.headers["x-razorpay-signature"];
   if (!signature) return false;
@@ -54,27 +59,27 @@ function extractPayment(body) {
 
 // ========= WEBHOOK ROUTE =========
 app.post("/razorpay-webhook", async (req, res) => {
-  const time = now();
-  console.log(`\n[${time}] 📩 Webhook received`);
+  console.log(`\n📩 Webhook received`);
 
   if (!verifySignature(req)) {
-    console.log(`[${time}] ❌ Invalid signature`);
+    console.log(`❌ Invalid signature`);
     return res.status(400).send("Invalid signature");
   }
 
-  console.log(`[${time}] 🔐 Signature OK`);
+  console.log(`🔐 Signature OK`);
   res.status(200).send("OK");
 
-  setTimeout(() => processWebhook(req.body, time), 5);
+  // process asynchronously
+  setTimeout(() => processWebhook(req.body), 5);
 });
 
 // ========= PROCESS WEBHOOK =========
-async function processWebhook(body, time) {
+async function processWebhook(body) {
   try {
     const event = body.event;
 
     if (!ALLOWED_PAYMENT_EVENTS.includes(event)) {
-      console.log(`[${time}] ⏭ Skipping event: ${event}`);
+      console.log(`⏭ Skipping event: ${event}`);
       return;
     }
 
@@ -82,13 +87,14 @@ async function processWebhook(body, time) {
     if (!payment) return;
 
     // Logging
-    console.log(`[${time}] 💰 Payment ID: ${payment.id}`);
-    console.log(`[${time}] 💳 Status: ${payment.status} (${event})`);
-    console.log(`[${time}] 👤 Email: ${payment.email}`);
-    console.log(`[${time}] 📞 Contact: ${payment.contact}`);
-    console.log(`[${time}] 🧑 Name: ${payment.notes?.name || "N/A"}`);
-    console.log(`[${time}] 🌆 City: ${payment.notes?.city || "N/A"}`);
-    console.log(`[${time}] 💵 Amount Paid: ₹${payment.amount / 100}`);
+    console.log(`💰 Payment ID: ${payment.id}`);
+    console.log(`💳 Status: ${payment.status} (${event})`);
+    console.log(`👤 Email: ${payment.email}`);
+    console.log(`📞 Contact: ${payment.contact}`);
+    console.log(`🧑 Name: ${payment.notes?.name || "N/A"}`);
+    console.log(`🌆 City: ${payment.notes?.city || "N/A"}`);
+    console.log(`💵 Amount Paid: ₹${payment.amount / 100}`);
+    console.log(`🕒 Payment Time (IST): ${timestampInKolkata(payment.created_at)}`);
 
     const formattedRow = [
       payment.id || "",
@@ -102,23 +108,23 @@ async function processWebhook(body, time) {
       payment.method || "",
       payment.notes?.name || "",
       payment.notes?.city || "",
-      new Date(payment.created_at * 1000).toLocaleString("en-IN")
+      timestampInKolkata(payment.created_at) // Razorpay timestamp in IST
     ];
 
     // Always write to Sheet1
     await appendToSheet("Sheet1!A:L", formattedRow);
-    console.log(`[${time}] ✅ Written to Sheet1`);
+    console.log(`✅ Written to Sheet1`);
 
-    // ===== SHEET2 LOGIC (Option A) =====
+    // ===== SHEET2 LOGIC =====
     if (payment.amount === AMOUNT_99) {
       await appendToSheet("Sheet2!A:L", formattedRow);
-      console.log(`[${time}] 🎯 Written to Sheet2 (₹99 payment)`);
+      console.log(`🎯 Written to Sheet2 (₹99 payment)`);
     } else {
-      console.log(`[${time}] ⏭ Not a ₹99 payment for Sheet2`);
+      console.log(`⏭ Not a ₹99 payment for Sheet2`);
     }
 
   } catch (err) {
-    console.error(`[${time}] ❌ Webhook processing error:`, err);
+    console.error(`❌ Webhook processing error:`, err);
   }
 }
 
