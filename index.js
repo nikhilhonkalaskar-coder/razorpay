@@ -92,10 +92,12 @@ async function processWebhook(body, time) {
 
     // Use payment.created_at timestamp or current time
     const paymentTime = new Date((payment.created_at || Math.floor(Date.now() / 1000)) * 1000);
-    const dateStr = paymentTime.toLocaleDateString("en-IN");   // DD/MM/YYYY
-    const timeStr = paymentTime.toLocaleTimeString("en-IN", { hour12: false }); // HH:MM:SS
 
-    // Prepare simplified row
+    // Convert to IST (India Standard Time)
+    const dateStr = paymentTime.toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata" });
+    const timeStr = paymentTime.toLocaleTimeString("en-IN", { hour12: false, timeZone: "Asia/Kolkata" });
+
+    // Prepare simplified row for Google Sheet
     const row = [
       payment.id || "",                     // Payment ID
       payment.order_id || "",               // Order
@@ -107,7 +109,7 @@ async function processWebhook(body, time) {
       payment.method || "",                 // Method
       payment.notes?.name || "",            // Name
       payment.notes?.city || "",            // City
-      `${dateStr} ${timeStr}`               // Date + Time
+      `${dateStr} ${timeStr}`               // Date + Time in IST
     ];
 
     await appendToSheet(row);
