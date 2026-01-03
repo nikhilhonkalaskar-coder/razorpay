@@ -112,13 +112,13 @@ async function processWebhook(body) {
     ];
 
     // Always write to Sheet1
-    await appendToSheet("Sheet1!A:L", formattedRow);
-    console.log(`✅ Written to Sheet1`);
+    await appendToSheet("Master!A:L", formattedRow);
+    console.log(`✅ Written to Master`);
 
     // ===== SHEET2 LOGIC =====
     if (payment.amount === AMOUNT_99) {
-      await appendToSheet("Sheet2!A:L", formattedRow);
-      console.log(`🎯 Written to Sheet2 (₹99 payment)`);
+      await appendToSheet("99!A:L", formattedRow);
+      console.log(`🎯 Written to 99 (₹99 payment)`);
     } else {
       console.log(`⏭ Not a ₹99 payment for Sheet2`);
     }
@@ -151,4 +151,5 @@ app.get("/razorpay-webhook", (req, res) => {
 // ========= START SERVER =========
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
+
 
