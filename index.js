@@ -8,8 +8,11 @@ const app = express();
 const SPREADSHEET_ID = "1AwTnaU2BMC0srkyq6iEI1A-PiUaNoTJsn8mG3QwZ04E";
 const WEBHOOK_SECRET = "Tbipl@123";
 
-// Store all ₹99 payments in Sheet2
+// Store all ₹99 payments in 99
 const AMOUNT_99 = 9900;
+
+// store all  ₹1500 payments in 1500
+const AMOUNT_1500 = 150000; // ₹1500 in paise
 
 // ========= RAZORPAY EVENTS ALLOWED =========
 const ALLOWED_PAYMENT_EVENTS = [
@@ -126,10 +129,10 @@ if (payment.amount === AMOUNT_99) {
 
 // ===== SHEET4 LOGIC =====
 if (payment.amount === AMOUNT_1500) {
-  await appendToSheet("Sheet4!A:L", formattedRow);
-  console.log(`🎯 Written to Sheet4 (₹1500 payment)`);
+  await appendToSheet("1500!A:L", formattedRow);
+  console.log(`🎯 Written to 1500 (₹1500 payment)`);
 } else {
-  console.log(`⏭ Not a ₹1500 payment for Sheet4`);
+  console.log(`⏭ Not a ₹1500 payment for 1500`);
 }
 
 
@@ -161,6 +164,7 @@ app.get("/razorpay-webhook", (req, res) => {
 // ========= START SERVER =========
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
+
 
 
 
