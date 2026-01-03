@@ -112,16 +112,26 @@ async function processWebhook(body) {
     ];
 
     // Always write to Sheet1
-    await appendToSheet("Master!A:L", formattedRow);
-    console.log(`✅ Written to Master`);
+  // Always write to Sheet1 (Master)
+await appendToSheet("Master!A:L", formattedRow);
+console.log(`✅ Written to Master`);
 
-    // ===== SHEET2 LOGIC =====
-    if (payment.amount === AMOUNT_99) {
-      await appendToSheet("99!A:L", formattedRow);
-      console.log(`🎯 Written to 99 (₹99 payment)`);
-    } else {
-      console.log(`⏭ Not a ₹99 payment for Sheet2`);
-    }
+// ===== SHEET2 LOGIC =====
+if (payment.amount === AMOUNT_99) {
+  await appendToSheet("99!A:L", formattedRow);
+  console.log(`🎯 Written to 99 (₹99 payment)`);
+} else {
+  console.log(`⏭ Not a ₹99 payment for Sheet2`);
+}
+
+// ===== SHEET4 LOGIC =====
+if (payment.amount === AMOUNT_1500) {
+  await appendToSheet("Sheet4!A:L", formattedRow);
+  console.log(`🎯 Written to Sheet4 (₹1500 payment)`);
+} else {
+  console.log(`⏭ Not a ₹1500 payment for Sheet4`);
+}
+
 
   } catch (err) {
     console.error(`❌ Webhook processing error:`, err);
@@ -151,5 +161,6 @@ app.get("/razorpay-webhook", (req, res) => {
 // ========= START SERVER =========
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
+
 
 
