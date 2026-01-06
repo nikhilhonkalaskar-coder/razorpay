@@ -5,8 +5,8 @@ const { google } = require("googleapis");
 const app = express();
 
 // ========= CONFIG =========
-const SPREADSHEET_ID = "1AwTnaU2BMC0srkyq6iEI1A-PiUaNoTJsn8mG3QwZ04E";
-const WEBHOOK_SECRET = "Tbipl@123";
+const SPREADSHEET_ID = "#";
+const WEBHOOK_SECRET = "#";
 
 // Store all ₹99 payments in 99
 const AMOUNT_99 = 9900;
@@ -164,6 +164,7 @@ app.get("/razorpay-webhook", (req, res) => {
 // ========= START SERVER =========
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
+
 
 
 
