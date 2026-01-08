@@ -6,7 +6,7 @@ const app = express();
 
 // ========= CONFIG =========
 const SPREADSHEET_ID = "#";
-const WEBHOOK_SECRET = "#";
+const WEBHOOK_SECRET = "Tbipl@123";
 
 // Store all ₹99 payments in 99
 const AMOUNT_99 = 9900;
@@ -164,6 +164,7 @@ app.get("/razorpay-webhook", (req, res) => {
 // ========= START SERVER =========
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
+
 
 
 
