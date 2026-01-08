@@ -1,49 +1,43 @@
+/**
+ * Razorpay Webhook → MySQL CRM ONLY
+ * Hardcoded PORT & WEBHOOK SECRET
+ */
+
 const express = require("express");
 const crypto = require("crypto");
-const { google } = require("googleapis");
+const mysql = require("mysql2/promise");
 
 const app = express();
 
-// ========= CONFIG =========
-const SPREADSHEET_ID = "#";
+/* ================== HARD CODED CONFIG ================== */
+
+// 👉 CHANGE THESE VALUES
+const PORT = 3000; // your server port
 const WEBHOOK_SECRET = "Tbipl@123";
 
-// Store all ₹99 payments in 99
-const AMOUNT_99 = 9900;
+/* ================== MYSQL ================== */
 
-// store all  ₹1500 payments in 1500
-const AMOUNT_1500 = 150000; // ₹1500 in paise
-
-// ========= RAZORPAY EVENTS ALLOWED =========
-const ALLOWED_PAYMENT_EVENTS = [
-  "payment.created",
-  "payment.authorized",
-  "payment.captured",
-  "payment.failed"
-];
-
-// RAW BODY for Razorpay signature validation
-app.use(express.json({
-  verify: (req, res, buf) => { req.rawBody = buf.toString(); }
-}));
-
-// ========= GOOGLE AUTH =========
-const client = new google.auth.JWT({
-  email: process.env.GOOGLE_CLIENT_EMAIL,
-  key: process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, "\n"),
-  scopes: ["https://www.googleapis.com/auth/spreadsheets"]
+const db = mysql.createPool({
+  host: "localhost",
+  user: "CRM_DB_USER",
+  password: "CRM_DB_PASSWORD",
+  database: "CRM_DB_NAME",
+  waitForConnections: true,
+  connectionLimit: 10
 });
-const sheets = google.sheets({ version: "v4", auth: client });
 
-// ========= TIME FUNCTION =========
-function timestampInKolkata(unixSeconds) {
-  return new Date(unixSeconds * 1000).toLocaleString("en-IN", {
-    timeZone: "Asia/Kolkata",
-    hour12: false,
-  });
-}
+/* ================== RAW BODY (VERY IMPORTANT) ================== */
 
-// ========= RAZORPAY SIGNATURE =========
+app.use(
+  express.json({
+    verify: (req, res, buf) => {
+      req.rawBody = buf.toString();
+    }
+  })
+);
+
+/* ================== HELPERS ================== */
+
 function verifySignature(req) {
   const signature = req.headers["x-razorpay-signature"];
   if (!signature) return false;
@@ -60,113 +54,109 @@ function extractPayment(body) {
   return body?.payload?.payment?.entity || null;
 }
 
-// ========= WEBHOOK ROUTE =========
-app.post("/razorpay-webhook", async (req, res) => {
-  console.log(`\n📩 Webhook received`);
+function buildCRMPayload(payment, event) {
+  return {
+    payment_id: payment.id,
+    order_id: payment.order_id,
+    email: payment.email || "",
+    phone: payment.contact || "",
+    customer_name: payment.notes?.name || "",
+    city: payment.notes?.city || "",
+    amount: payment.amount / 100,
+    currency: payment.currency,
+    status: payment.status,
+    event,
+    method: payment.method,
+    paid_at: new Date(payment.created_at * 1000)
+  };
+}
 
-  if (!verifySignature(req)) {
-    console.log(`❌ Invalid signature`);
-    return res.status(400).send("Invalid signature");
-  }
+/* ================== CRM INSERT ================== */
 
-  console.log(`🔐 Signature OK`);
-  res.status(200).send("OK");
-
-  // process asynchronously
-  setTimeout(() => processWebhook(req.body), 5);
-});
-
-// ========= PROCESS WEBHOOK =========
-async function processWebhook(body) {
+async function pushToCRM(data) {
   try {
-    const event = body.event;
-
-    if (!ALLOWED_PAYMENT_EVENTS.includes(event)) {
-      console.log(`⏭ Skipping event: ${event}`);
+    // Store only successful payments
+    if (data.status !== "captured") {
+      console.log("⏭ CRM skipped (not captured)");
       return;
     }
 
-    const payment = extractPayment(body);
-    if (!payment) return;
+    await db.execute(
+      `INSERT INTO crm_payments
+      (payment_id, order_id, email, phone, customer_name, city,
+       amount, currency, status, event, method, paid_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON DUPLICATE KEY UPDATE payment_id = payment_id`,
+      [
+        data.payment_id,
+        data.order_id,
+        data.email,
+        data.phone,
+        data.customer_name,
+        data.city,
+        data.amount,
+        data.currency,
+        data.status,
+        data.event,
+        data.method,
+        data.paid_at
+      ]
+    );
 
-    // Logging
-    console.log(`💰 Payment ID: ${payment.id}`);
-    console.log(`💳 Status: ${payment.status} (${event})`);
-    console.log(`👤 Email: ${payment.email}`);
-    console.log(`📞 Contact: ${payment.contact}`);
-    console.log(`🧑 Name: ${payment.notes?.name || "N/A"}`);
-    console.log(`🌆 City: ${payment.notes?.city || "N/A"}`);
-    console.log(`💵 Amount Paid: ₹${payment.amount / 100}`);
-    console.log(`🕒 Payment Time (IST): ${timestampInKolkata(payment.created_at)}`);
-
-    const formattedRow = [
-      payment.id || "",
-      payment.order_id || "",
-      payment.email || "",
-      payment.contact || "",
-      payment.amount ? payment.amount / 100 : "",
-      payment.currency || "",
-      event,
-      payment.status || "",
-      payment.method || "",
-      payment.notes?.name || "",
-      payment.notes?.city || "",
-      timestampInKolkata(payment.created_at) // Razorpay timestamp in IST
-    ];
-
-    // Always write to Sheet1
-  // Always write to Sheet1 (Master)
-await appendToSheet("Master!A:L", formattedRow);
-console.log(`✅ Written to Master`);
-
-// ===== SHEET2 LOGIC =====
-if (payment.amount === AMOUNT_99) {
-  await appendToSheet("99!A:L", formattedRow);
-  console.log(`🎯 Written to 99 (₹99 payment)`);
-} else {
-  console.log(`⏭ Not a ₹99 payment for Sheet2`);
-}
-
-// ===== SHEET4 LOGIC =====
-if (payment.amount === AMOUNT_1500) {
-  await appendToSheet("1500!A:L", formattedRow);
-  console.log(`🎯 Written to 1500 (₹1500 payment)`);
-} else {
-  console.log(`⏭ Not a ₹1500 payment for 1500`);
-}
-
-
+    console.log("✅ Stored in CRM:", data.payment_id);
   } catch (err) {
-    console.error(`❌ Webhook processing error:`, err);
+    console.error("❌ CRM DB Error:", err.message);
   }
 }
 
-// ========= WRITE TO SHEET =========
-async function appendToSheet(range, row) {
-  try {
-    await client.authorize();
-    await sheets.spreadsheets.values.append({
-      spreadsheetId: SPREADSHEET_ID,
-      range,
-      valueInputOption: "RAW",
-      requestBody: { values: [row] }
-    });
-  } catch (err) {
-    console.error("❌ Google Sheets error:", err.message);
-  }
-}
+/* ================== WEBHOOK ================== */
 
-// ========= TEST ROUTE =========
-app.get("/razorpay-webhook", (req, res) => {
-  res.status(200).send("✔ Razorpay Webhook Active");
+app.post("/razorpay-webhook", (req, res) => {
+  console.log("\n📩 Webhook received");
+
+  if (!verifySignature(req)) {
+    console.log("❌ Invalid signature");
+    return res.status(400).send("Invalid signature");
+  }
+
+  res.status(200).send("OK");
+
+  // async processing
+  setImmediate(async () => {
+    try {
+      const event = req.body.event;
+      const payment = extractPayment(req.body);
+      if (!payment) return;
+
+     const time = istTime(payment.created_at);
+
+// Log payment info
+console.log(`[${time}] 💰 Payment ID: ${payment.id}`);
+console.log(`[${time}] 💳 Status: ${payment.status}`);
+console.log(`[${time}] 👤 Email: ${payment.email || "N/A"}`);
+console.log(`[${time}] 📞 Contact: ${payment.contact || "N/A"}`);
+console.log(`[${time}] 🧑 Name: ${payment.notes?.name || "N/A"}`);
+console.log(`[${time}] 🌆 City: ${payment.notes?.city || "N/A"}`);
+console.log(
+  `[${time}] 💵 Amount Paid: ₹${payment.amount ? payment.amount / 100 : 0}`
+);
+
+      const crmPayload = buildCRMPayload(payment, event);
+      await pushToCRM(crmPayload);
+    } catch (err) {
+      console.error("❌ Webhook error:", err);
+    }
+  });
 });
 
-// ========= START SERVER =========
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
+/* ================== TEST ROUTE ================== */
 
+app.get("/razorpay-webhook", (req, res) => {
+  res.send("✅ Razorpay Webhook Active (CRM ONLY)");
+});
 
+/* ================== START SERVER ================== */
 
-
-
-
+app.listen(PORT, () => {
+  console.log(`🚀 Server running on port ${PORT}`);
+});
