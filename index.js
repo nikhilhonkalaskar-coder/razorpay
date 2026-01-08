@@ -7,7 +7,7 @@ const app = express();
 /* ================== CONFIG ================== */
 
 const PORT = 3000;
-const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET || "Tbipl@123";
+const WEBHOOK_SECRET ="Tbipl@123";
 
 // Payment amounts in paise
 const AMOUNT_99 = 9900;
@@ -171,5 +171,6 @@ app.get("/razorpay-webhook", (req, res) => {
 app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
 });
+
 
 
