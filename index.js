@@ -1,8 +1,3 @@
-/**
- * Razorpay Webhook → MySQL CRM ONLY
- * Render + Local compatible
- */
-
 const express = require("express");
 const crypto = require("crypto");
 const mysql = require("mysql2/promise");
@@ -11,40 +6,40 @@ const app = express();
 
 /* ================== CONFIG ================== */
 
-// ✅ REQUIRED for Render
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 3000; // Use env PORT for platforms like Render
+const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET || "Tbipl@123"; // Use env or fallback
 
-// ⚠️ Prefer env var, but hardcoded works
-const WEBHOOK_SECRET = "Tbipl@123";
+// Payment amounts in paise
+const AMOUNT_99 = 9900;
+const AMOUNT_1500 = 150000;
 
-/* ================== MYSQL ================== */
+/* ================== MYSQL CONNECTION ================== */
 
 const db = mysql.createPool({
-  host: "localhost",
-  user: "CRM_DB_USER",
-  password: "CRM_DB_PASSWORD",
-  database: "CRM_DB_NAME",
+  host: process.env.DB_HOST || "localhost",
+  user: process.env.DB_USER || "CRM_DB_USER",
+  password: process.env.DB_PASS || "CRM_DB_PASSWORD",
+  database: process.env.DB_NAME || "CRM_DB_NAME",
   waitForConnections: true,
-  connectionLimit: 10
+  connectionLimit: 10,
 });
 
-/* ================== RAW BODY ================== */
+/* ================== RAW BODY (for signature verification) ================== */
 
 app.use(
   express.json({
     verify: (req, res, buf) => {
       req.rawBody = buf.toString();
-    }
+    },
   })
 );
 
 /* ================== HELPERS ================== */
 
-// 🔹 IST Time Helper (YOU WERE MISSING THIS)
-function istTime(unix) {
-  return new Date(unix * 1000).toLocaleString("en-IN", {
+function timestampInKolkata(unixSeconds) {
+  return new Date(unixSeconds * 1000).toLocaleString("en-IN", {
     timeZone: "Asia/Kolkata",
-    hour12: false
+    hour12: false,
   });
 }
 
@@ -64,63 +59,46 @@ function extractPayment(body) {
   return body?.payload?.payment?.entity || null;
 }
 
-function buildCRMPayload(payment, event) {
-  return {
-    payment_id: payment.id,
-    order_id: payment.order_id,
-    email: payment.email || "",
-    phone: payment.contact || "",
-    customer_name: payment.notes?.name || "",
-    city: payment.notes?.city || "",
-    amount: payment.amount / 100,
-    currency: payment.currency,
-    status: payment.status,
-    event,
-    method: payment.method,
-    paid_at: new Date(payment.created_at * 1000)
-  };
-}
+/* ================== STORE PAYMENT TO CRM ================== */
 
-/* ================== CRM INSERT ================== */
-
-async function pushToCRM(data) {
+async function storePaymentToCRM(payment, event) {
   try {
-    if (data.status !== "captured") {
-      console.log("⏭ CRM skipped (not captured)");
+    // Only store successful captured payments
+    if (payment.status !== "captured") {
+      console.log(`⏭ Skipped CRM insert (status: ${payment.status})`);
       return;
     }
 
-    await db.execute(
-      `INSERT INTO crm_payments
-      (payment_id, order_id, email, phone, customer_name, city,
-       amount, currency, status, event, method, paid_at)
+    const sql = `INSERT INTO crm_payments
+      (payment_id, order_id, email, phone, customer_name, city, amount, currency, status, event, method, paid_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      ON DUPLICATE KEY UPDATE payment_id = payment_id`,
-      [
-        data.payment_id,
-        data.order_id,
-        data.email,
-        data.phone,
-        data.customer_name,
-        data.city,
-        data.amount,
-        data.currency,
-        data.status,
-        data.event,
-        data.method,
-        data.paid_at
-      ]
-    );
+      ON DUPLICATE KEY UPDATE payment_id = payment_id`;
 
-    console.log("✅ Stored in CRM:", data.payment_id);
+    const params = [
+      payment.id,
+      payment.order_id,
+      payment.email || "",
+      payment.contact || "",
+      payment.notes?.name || "",
+      payment.notes?.city || "",
+      payment.amount / 100,
+      payment.currency,
+      payment.status,
+      event,
+      payment.method,
+      new Date(payment.created_at * 1000),
+    ];
+
+    await db.execute(sql, params);
+    console.log(`✅ Stored in CRM: ${payment.id}`);
   } catch (err) {
     console.error("❌ CRM DB Error:", err.message);
   }
 }
 
-/* ================== WEBHOOK ================== */
+/* ================== WEBHOOK HANDLER ================== */
 
-app.post("/razorpay-webhook", (req, res) => {
+app.post("/razorpay-webhook", async (req, res) => {
   console.log("\n📩 Webhook received");
 
   if (!verifySignature(req)) {
@@ -130,39 +108,54 @@ app.post("/razorpay-webhook", (req, res) => {
 
   res.status(200).send("OK");
 
-  setImmediate(async () => {
+  // Process asynchronously
+  setTimeout(async () => {
     try {
-      const event = req.body.event;
-      const payment = extractPayment(req.body);
-      if (!payment) return;
+      const body = req.body;
+      const event = body.event;
 
-      const time = istTime(payment.created_at);
+      if (
+        ![
+          "payment.created",
+          "payment.authorized",
+          "payment.captured",
+          "payment.failed",
+        ].includes(event)
+      ) {
+        console.log(`⏭ Skipping event: ${event}`);
+        return;
+      }
 
+      const payment = extractPayment(body);
+      if (!payment) {
+        console.log("⏭ No payment data found");
+        return;
+      }
+
+      // Log payment info with IST timestamp
+      const time = timestampInKolkata(payment.created_at);
       console.log(`[${time}] 💰 Payment ID: ${payment.id}`);
-      console.log(`[${time}] 💳 Status: ${payment.status}`);
+      console.log(`[${time}] 💳 Status: ${payment.status} (${event})`);
       console.log(`[${time}] 👤 Email: ${payment.email || "N/A"}`);
       console.log(`[${time}] 📞 Contact: ${payment.contact || "N/A"}`);
       console.log(`[${time}] 🧑 Name: ${payment.notes?.name || "N/A"}`);
       console.log(`[${time}] 🌆 City: ${payment.notes?.city || "N/A"}`);
       console.log(`[${time}] 💵 Amount Paid: ₹${payment.amount / 100}`);
 
-      const crmPayload = buildCRMPayload(payment, event);
-      await pushToCRM(crmPayload);
-
+      // Store payment in CRM (MySQL)
+      await storePaymentToCRM(payment, event);
     } catch (err) {
-      console.error("❌ Webhook error:", err);
+      console.error("❌ Webhook processing error:", err);
     }
-  });
+  }, 5);
 });
 
-/* ================== TEST ================== */
+/* ================== TEST ROUTE ================== */
 
 app.get("/razorpay-webhook", (req, res) => {
-  res.send("✅ Razorpay Webhook Active (CRM ONLY)");
+  res.status(200).send("✔ Razorpay Webhook Active (CRM ONLY)");
 });
 
-/* ================== START ================== */
+/* ================== START SERVER ================== */
 
-app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
-});
+app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
