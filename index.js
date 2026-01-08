@@ -1,6 +1,6 @@
 /**
  * Razorpay Webhook → MySQL CRM ONLY
- * Hardcoded PORT & WEBHOOK SECRET
+ * Render + Local compatible
  */
 
 const express = require("express");
@@ -9,10 +9,12 @@ const mysql = require("mysql2/promise");
 
 const app = express();
 
-/* ================== HARD CODED CONFIG ================== */
+/* ================== CONFIG ================== */
 
-// 👉 CHANGE THESE VALUES
-const PORT = 3000; // your server port
+// ✅ REQUIRED for Render
+const PORT = process.env.PORT || 3000;
+
+// ⚠️ Prefer env var, but hardcoded works
 const WEBHOOK_SECRET = "Tbipl@123";
 
 /* ================== MYSQL ================== */
@@ -26,7 +28,7 @@ const db = mysql.createPool({
   connectionLimit: 10
 });
 
-/* ================== RAW BODY (VERY IMPORTANT) ================== */
+/* ================== RAW BODY ================== */
 
 app.use(
   express.json({
@@ -37,6 +39,14 @@ app.use(
 );
 
 /* ================== HELPERS ================== */
+
+// 🔹 IST Time Helper (YOU WERE MISSING THIS)
+function istTime(unix) {
+  return new Date(unix * 1000).toLocaleString("en-IN", {
+    timeZone: "Asia/Kolkata",
+    hour12: false
+  });
+}
 
 function verifySignature(req) {
   const signature = req.headers["x-razorpay-signature"];
@@ -75,7 +85,6 @@ function buildCRMPayload(payment, event) {
 
 async function pushToCRM(data) {
   try {
-    // Store only successful payments
     if (data.status !== "captured") {
       console.log("⏭ CRM skipped (not captured)");
       return;
@@ -121,43 +130,39 @@ app.post("/razorpay-webhook", (req, res) => {
 
   res.status(200).send("OK");
 
-  // async processing
   setImmediate(async () => {
     try {
       const event = req.body.event;
       const payment = extractPayment(req.body);
       if (!payment) return;
 
-     const time = istTime(payment.created_at);
+      const time = istTime(payment.created_at);
 
-// Log payment info
-console.log(`[${time}] 💰 Payment ID: ${payment.id}`);
-console.log(`[${time}] 💳 Status: ${payment.status}`);
-console.log(`[${time}] 👤 Email: ${payment.email || "N/A"}`);
-console.log(`[${time}] 📞 Contact: ${payment.contact || "N/A"}`);
-console.log(`[${time}] 🧑 Name: ${payment.notes?.name || "N/A"}`);
-console.log(`[${time}] 🌆 City: ${payment.notes?.city || "N/A"}`);
-console.log(
-  `[${time}] 💵 Amount Paid: ₹${payment.amount ? payment.amount / 100 : 0}`
-);
+      console.log(`[${time}] 💰 Payment ID: ${payment.id}`);
+      console.log(`[${time}] 💳 Status: ${payment.status}`);
+      console.log(`[${time}] 👤 Email: ${payment.email || "N/A"}`);
+      console.log(`[${time}] 📞 Contact: ${payment.contact || "N/A"}`);
+      console.log(`[${time}] 🧑 Name: ${payment.notes?.name || "N/A"}`);
+      console.log(`[${time}] 🌆 City: ${payment.notes?.city || "N/A"}`);
+      console.log(`[${time}] 💵 Amount Paid: ₹${payment.amount / 100}`);
 
       const crmPayload = buildCRMPayload(payment, event);
       await pushToCRM(crmPayload);
+
     } catch (err) {
       console.error("❌ Webhook error:", err);
     }
   });
 });
 
-/* ================== TEST ROUTE ================== */
+/* ================== TEST ================== */
 
 app.get("/razorpay-webhook", (req, res) => {
   res.send("✅ Razorpay Webhook Active (CRM ONLY)");
 });
 
-/* ================== START SERVER ================== */
+/* ================== START ================== */
 
 app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
 });
-
